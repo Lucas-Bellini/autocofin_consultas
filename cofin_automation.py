@@ -194,6 +194,64 @@ def search_by_serial_number(driver, serial_number="SSL51514", max_attempts=20):
     print(f"Failed to complete search after {max_attempts} attempts")
     return False
 
+def verify_search_result(driver, serial_number, max_attempts=30):
+    """
+    Verifica se a busca foi bem-sucedida através da mudança de URL
+    Retenta a busca se necessário
+    """
+    initial_url = "https://cofin.sp.gov.br/#/menu/gestao-patrimonial/movimentacao-materiais/consultar-movimentacao"
+    attempt = 1
+    
+    while attempt <= max_attempts:
+        print(f"Verificação {attempt}/{max_attempts} do resultado da busca para {serial_number}")
+        
+        # Aguarda até 10 segundos para ver se a URL muda
+        try:
+            # Verifica se ainda estamos na URL inicial (o que indica que a busca não teve sucesso)
+            current_url = driver.current_url
+            print(f"URL atual: {current_url}")
+            
+            if current_url != initial_url:
+                print(f"URL mudou: busca bem-sucedida para {serial_number}")
+                return True
+                
+            print(f"URL não mudou após {attempt} tentativa(s). Tentando novamente...")
+            
+            # Tenta clicar no botão novamente
+            try:
+                search_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.ID, "btnEncontrarMaterial"))
+                )
+                
+                # Tenta clique normal
+                try:
+                    search_button.click()
+                    print(f"Tentativa {attempt}: botão Encontrar clicado")
+                except Exception as e:
+                    print(f"Clique normal falhou: {str(e)}")
+                    
+                    # Tenta JavaScript click como fallback
+                    try:
+                        driver.execute_script("arguments[0].click();", search_button)
+                        print(f"Tentativa {attempt}: JavaScript click realizado no botão Encontrar")
+                    except Exception as js_e:
+                        print(f"JavaScript click também falhou: {str(js_e)}")
+                
+                # Aguarda 5 segundos para ver se a URL muda após a nova tentativa
+                time.sleep(5)
+                
+            except Exception as e:
+                print(f"Não foi possível encontrar o botão para nova tentativa: {str(e)}")
+            
+        except Exception as e:
+            print(f"Erro ao verificar URL na tentativa {attempt}: {str(e)}")
+        
+        attempt += 1
+        time.sleep(2)
+    
+    print(f"Falha na busca de {serial_number} após {max_attempts} tentativas: URL não mudou")
+    return False
+
 def extract_material_details(driver):
     """
     Extrai os detalhes do material da página
@@ -213,7 +271,7 @@ def extract_material_details(driver):
             
             # Tenta localizar a div principal de detalhes
             try:
-                details_container = WebDriverWait(driver, 3).until(
+                details_container = WebDriverWait(driver, 4).until(
                     EC.presence_of_element_located((By.XPATH, details_xpath))
                 )
                 
@@ -270,54 +328,81 @@ def extract_material_details(driver):
     print("Falha ao extrair detalhes do material após várias tentativas")
     return None
 
-def go_back(driver, max_attempts=10):
-    """Clica no botão Voltar para retornar à página anterior"""
+def go_back(driver, max_attempts=15):
+    """
+    Retorna à página de consulta navegando diretamente pela URL, recarrega a página e
+    garante que estamos na página correta antes de continuar com a automação
+    """
+    search_url = "https://cofin.sp.gov.br/#/menu/gestao-patrimonial/movimentacao-materiais/consultar-movimentacao"
     attempt = 1
+    
     while attempt <= max_attempts:
         try:
-            print(f"Tentativa {attempt}/{max_attempts} para voltar à página anterior")
+            print(f"Tentativa {attempt}/{max_attempts} para voltar à página de consulta")
             
-            # Localiza e clica no botão Voltar
-            back_button_xpath = '//*[@id="canvas-bookmark"]/div/div[2]/main/app-detalhar-material-visualizar/div/div/div/form/div[2]/div/button'
+            # Primeiro navega para a URL de consulta, independentemente da URL atual
+            print("Navegando para a URL de consulta...")
+            driver.get(search_url)
             
+            # Aguarda para que a navegação complete
+            time.sleep(3)
+            
+            # Verifica se a navegação foi bem-sucedida
+            if driver.current_url != search_url:
+                print(f"⚠️ Falha na navegação. URL atual: {driver.current_url}")
+                attempt += 1
+                continue
+            
+            # Sempre faz um refresh explícito para evitar bugs
+            print("🔄 Recarregando a página para evitar bugs...")
+            driver.refresh()
+            
+            # Aguarda pelo menos 5 segundos após o refresh
+            print("⏱️ Aguardando 5 segundos para carregamento completo...")
+            time.sleep(5)
+            
+            # Verifica se a página carregou corretamente validando a presença do campo de número de série
             try:
-                back_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, back_button_xpath))
+                print("Verificando se o campo de número de série está disponível...")
+                input_field = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.ID, "inputTextNumeroSerie"))
                 )
                 
-                # Tenta clicar normalmente
+                # Tenta interagir com o campo para garantir que está realmente funcional
+                input_field.clear()
+                print("Campo de número de série está funcional")
+                
+                # Verifica também se o botão de pesquisa está presente
+                search_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.ID, "btnEncontrarMaterial"))
+                )
+                print("Botão 'Encontrar' também está disponível")
+                
+                # Verifica se há bloqueio UI ativo
                 try:
-                    print("Tentando clicar no botão Voltar...")
-                    back_button.click()
-                    print("Botão Voltar clicado com sucesso")
-                    
-                    # Aguarda um momento para garantir que a navegação ocorreu
-                    time.sleep(3)
-                    return True
-                except Exception as e:
-                    print(f"Clique normal falhou: {str(e)}")
-                    
-                    # Tenta JavaScript click como alternativa
-                    try:
-                        print("Tentando JavaScript click...")
-                        driver.execute_script("arguments[0].click();", back_button)
-                        print("JavaScript click no botão Voltar bem-sucedido")
-                        time.sleep(3)
-                        return True
-                    except Exception as js_e:
-                        print(f"JavaScript click também falhou: {str(js_e)}")
+                    block_ui = driver.find_element(By.CLASS_NAME, "block-ui-wrapper.block-ui-main.active")
+                    print("⚠️ Bloqueio UI detectado, aguardando desaparecer...")
+                    time.sleep(5)  # Aguarda para o bloqueio desaparecer
+                    continue  # Tenta novamente para garantir que o bloqueio desapareceu
+                except:
+                    print("✓ Nenhum bloqueio UI detectado, página pronta para uso")
+                
+                print("✅ Confirmado: Estamos na página de consulta e todos os elementos estão disponíveis")
+                return True
+                
             except Exception as e:
-                print(f"Não foi possível encontrar o botão Voltar: {str(e)}")
-            
-            time.sleep(2)
-            attempt += 1
+                print(f"⚠️ Elementos da página não estão disponíveis: {str(e)}")
+                
+                if attempt < max_attempts:
+                    print("Tentando nova navegação e refresh...")
             
         except Exception as e:
-            print(f"Erro durante a tentativa {attempt} de voltar: {str(e)}")
-            attempt += 1
-            time.sleep(2)
+            print(f"❌ Erro durante a tentativa {attempt} de voltar: {str(e)}")
+        
+        attempt += 1
+        time.sleep(3)
     
-    print(f"Falha ao voltar à página anterior após {max_attempts} tentativas")
+    print(f"❌ Falha ao retornar à página de consulta após {max_attempts} tentativas")
     return False
 
 def read_serial_numbers(file_path):
@@ -378,21 +463,27 @@ if __name__ == "__main__":
                     search_success = search_by_serial_number(driver, serial_number)
                     
                     if search_success:
-                        # Extrai os detalhes se a busca foi bem-sucedida
-                        material_data = extract_material_details(driver)
+                        # Verifica se a busca realmente resultou em uma mudança de URL
+                        result_success = verify_search_result(driver, serial_number)
                         
-                        if material_data:
-                            # Adiciona o número de série explicitamente aos dados (caso não tenha sido extraído)
-                            material_data['Numero_Serie_Pesquisado'] = serial_number
-                            all_results.append(material_data)
-                            print(f"Dados do item {serial_number} extraídos com sucesso")
+                        if result_success:
+                            # Extrai os detalhes se a busca foi bem-sucedida e a URL mudou
+                            material_data = extract_material_details(driver)
                             
-                            # Volta para a página de busca
-                            go_back(driver)
+                            if material_data:
+                                # Adiciona o número de série explicitamente aos dados (caso não tenha sido extraído)
+                                material_data['Numero_Serie_Pesquisado'] = serial_number
+                                all_results.append(material_data)
+                                print(f"Dados do item {serial_number} extraídos com sucesso")
+                                
+                                # Volta para a página de busca
+                                go_back(driver)
+                            else:
+                                print(f"Falha ao extrair dados para o item {serial_number}")
                         else:
-                            print(f"Falha ao extrair dados para o item {serial_number}")
+                            print(f"Item com número de série {serial_number} não foi encontrado (URL não mudou)")
                     else:
-                        print(f"Não foi possível encontrar o item com número de série: {serial_number}")
+                        print(f"Não foi possível pesquisar o item com número de série: {serial_number}")
                 
                 # Salva todos os resultados em um único arquivo Excel
                 if all_results:
